@@ -1,0 +1,5 @@
+kernighan-ritchie-exercises/compiled/*
+*.pdf
+misc/*
+.claude/settings.local.json
+.ruby-lsp/*

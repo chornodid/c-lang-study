@@ -1,0 +1,224 @@
+#!/usr/bin/env ruby
+
+require 'fileutils'
+require 'pathname'
+require 'open3'
+
+class ExerciseTestRunner
+  BASE_DIR = File.dirname(__FILE__).freeze
+  EXERCISE_DIR = File.join(BASE_DIR, 'kernighan-ritchie-exercises').freeze
+  TEST_DIR = File.join(EXERCISE_DIR, 'tests').freeze
+  COMPILED_FILES_DIR = File.join(EXERCISE_DIR, 'compiled').freeze
+
+  # ANSI colors
+  ANSI_GREEN  = "\e[32m".freeze
+  ANSI_RED    = "\e[31m".freeze
+  ANSI_YELLOW = "\e[33m".freeze
+  ANSI_DIM    = "\e[2m".freeze
+  ANSI_RESET  = "\e[0m".freeze
+
+  def initialize(show_pending)
+    @show_pending = show_pending
+  end
+
+  def run
+    puts "Running tests for Kernigan & Ritchie exercises"
+    puts "=" * 60
+
+    unless Dir.exist?(TEST_DIR)
+      raise StandardError, "Test directory not found: #{TEST_DIR}"
+    end
+
+    source_files = Dir.glob("ch-*/*.c", base: EXERCISE_DIR).map(&:to_s)
+    file_mapping = [] 
+    log = File.readlines(File.join(COMPILED_FILES_DIR, '.log')).map(&:chomp)
+
+    source_files.each do |source_file|
+      compiled_file = nil
+      log.each do |log_entry|
+        parts = log_entry.split("|").map(&:to_s)
+        if parts[0] == source_file
+          compiled_file = parts[1]
+          break
+        end
+      end
+
+      test_dir = File.join(TEST_DIR, source_file.sub(/.c$/, ''))
+
+      mapping_entry = {
+        source_file: source_file,
+        compiled_file: compiled_file,
+        test_dir: test_dir,
+        test_files: [],
+      }
+
+      if Dir.exist?(test_dir)
+        mapping_entry[:test_files] = Dir.glob('*.test', base: test_dir).map(&:to_s)
+      end
+
+      file_mapping << mapping_entry
+    end
+
+    # self-check
+    test_file_count = Dir.glob("**/*.test", base: TEST_DIR).count
+    mapped_test_file_count = file_mapping.sum { |fm| fm.fetch(:test_files).count }
+    if test_file_count != mapped_test_file_count
+      puts("Test file count: #{test_file_count}")
+      puts("Mapped test file count: #{mapped_test_file_count}")
+      raise StandardError, "Not all test files were mapped to source files"
+    end
+
+    @passed_test_count = 0
+    @failed_test_count = 0
+    @pending_file_count = 0
+    @not_compiled_file_count = 0
+    @failures = []
+
+    file_mapping.each do |mapping_entry|
+      source_file, compiled_file, test_dir, test_files = mapping_entry.values_at(
+        :source_file, :compiled_file, :test_dir, :test_files
+      )
+
+      if compiled_file.nil?
+        if @show_pending
+          puts "#{source_file} #{ANSI_DIM} ...not compiled#{ANSI_RESET}"
+        end
+        @not_compiled_file_count += 1
+      elsif test_files.empty?
+        if @show_pending
+          puts "#{source_file} #{ANSI_YELLOW} ...pending#{ANSI_RESET}"
+        end
+        @pending_file_count += 1
+      else
+        print(source_file)
+        print(' ')
+        test_files.each do |test_file|
+          test_result = run_test(
+            File.join(COMPILED_FILES_DIR, compiled_file), 
+            File.join(test_dir, test_file),
+          )
+
+          case test_result.fetch(:status)
+          when :pass
+            print "#{ANSI_GREEN}✓#{ANSI_RESET}"
+            @passed_test_count += 1
+          when :failed, :error
+            print "#{ANSI_RED}✗#{ANSI_RESET}"
+            @failed_test_count += 1
+            @failures << {
+              source_file: source_file,
+              test_file: test_file,
+              error: test_result.dig(:error),
+              expected: test_result.dig(:expected),
+              actual: test_result.dig(:actual),
+            }
+          else
+            raise StandardError, "uknown test status: #{test_result.fetch(:status)}"
+          end
+        end
+
+        print "\n"
+      end
+    end
+
+    print_summary
+  end
+
+  private
+
+  def run_test(compiled_file_path, test_file_path)
+
+    test_data = parse_test_file(test_file_path)
+
+    stdout, stderr, status = Open3.capture3(
+      compiled_file_path, 
+      *test_data[:args], 
+      stdin_data: test_data[:stdin]
+    )
+
+    if status.success?
+      { 
+        status: test_data[:expected] == stdout ? :pass : :failed,
+        expected: test_data[:expected],
+        actual: stdout,
+      }
+    else
+      { 
+        status: :error,
+        error: stderr,
+      }
+    end
+  end
+
+  def parse_test_file(file_path)
+    content = File.read(file_path)
+
+    args = []
+    stdin = ""
+    expected = ""
+    current_section = nil
+
+    content.each_line do |line|
+      case line.strip
+      when '[ARGS]'
+        current_section = :args
+      when '[STDIN]'
+        current_section = :stdin
+      when '[EXPECTED]'
+        current_section = :expected
+      else
+        case current_section
+        when :args
+          args = line.strip.split unless line.strip.empty?
+        when :stdin
+          stdin += line
+        when :expected
+          expected += line
+        end
+      end
+    end
+
+    {
+      args: args,
+      stdin: stdin,
+      expected: expected,
+    }
+  end
+
+  def print_summary
+    puts
+    puts "=" * 60
+    puts "Test Summary:"
+    puts "  #{ANSI_GREEN}Passed tests: #{@passed_test_count}#{ANSI_RESET}"
+    if @failed_test_count > 0
+      puts "  #{ANSI_RED}Failed tests: #{@failed_test_count}#{ANSI_RESET}"
+    end
+    if @pending_file_count > 0
+      puts "  #{ANSI_YELLOW}Pending files: #{@pending_file_count}#{ANSI_RESET}"
+    end
+    if @not_compiled_file_count > 0
+      puts "  #{ANSI_DIM}Not compiled files: #{@not_compiled_file_count}#{ANSI_RESET}"
+    end
+
+    if @failures.any?
+      puts
+      puts "Failed Tests:"
+      @failures.each do |failure|
+        puts "#{ANSI_RED}- #{failure[:test_file]}#{ANSI_RESET}"
+        if failure.fetch(:error)
+          failure.fetch(:error).each_line { |l| puts "  #{l}" }
+        else
+          puts "  Expected:"
+          failure.fetch(:expected).each_line { |l| puts "    #{l}" }
+          puts "  Actual:"
+          failure.fetch(:actual).each_line { |l| puts "    #{l}" }
+        end
+      end
+    end
+
+    exit(@failed_test_count > 0 ? 1 : 0)
+  end
+end
+
+show_pending = ARGV[0] == '-p' || ARGV[0] == '--pending'
+ExerciseTestRunner.new(show_pending).run

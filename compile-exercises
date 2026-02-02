@@ -1,0 +1,323 @@
+#!/usr/bin/env ruby
+
+require 'fileutils'
+require 'pathname'
+require 'digest'
+require 'shellwords'
+require 'thread'
+
+class ExerciseCompiler
+  BASE_DIR = File.dirname(__FILE__).freeze
+  EXERCISES_DIR = File.join(BASE_DIR, 'kernighan-ritchie-exercises').freeze
+
+  COMPILER = 'gcc'.freeze
+  COMPILATION_FLAGS = [
+    # Use C99 standard
+    '-std=c99',
+    # Enable most common warnings
+    '-Wall',
+    # Enable additional warnings beyond -Wall
+    '-Wextra',
+    # Strict ISO C compliance, reject non-standard features
+    '-pedantic',
+    # Include debug information
+    '-g',
+    # Detect memory errors (buffer overflows, use-after-free, etc.)
+    '-fsanitize=address',
+    # Detect undefined behavior at runtime
+    '-fsanitize=undefined'
+  ].join(" ").freeze
+  COMPILED_FILES_DIR = File.join(EXERCISES_DIR, 'compiled').freeze
+  COMPILATION_LOG_FILE = File.join(COMPILED_FILES_DIR, '.log').freeze
+
+  # ANSI escape sequences
+  ANSI_GREEN = "\e[32m".freeze
+  ANSI_RED = "\e[31m".freeze
+  ANSI_YELLOW = "\e[33m".freeze
+  ANSI_DIM = "\e[2m".freeze
+  ANSI_RESET = "\e[0m".freeze
+  ANSI_CLEAR_FROM_CURSOR_TO_END_OF_SCREEN = "\e[J".freeze
+  ANSI_MOVE_CURSOR_UP_N_LINES = ->(n) { "\e[#{n}A" }
+
+  def initialize
+    @mutex = Mutex.new
+  end
+
+  def run(force)
+    @in_progress_files = []
+    @completed_files = []
+    @errors = []
+    @warnings = []
+    @log, @last_compilation_flags = load_log
+
+    puts "Compiling source files from #{EXERCISES_DIR}"
+    puts "=" * 60
+
+    unless Dir.exist?(EXERCISES_DIR)
+      puts "Error: #{EXERCISES_DIR} does not exist"
+      return
+    end
+
+    # Create compiled directory if it doesn't exist
+    FileUtils.mkdir_p(COMPILED_FILES_DIR) unless Dir.exist?(COMPILED_FILES_DIR)
+
+    if force
+      puts("Forced recompilation of all files")
+      delete_all_compiled_files
+    elsif COMPILATION_FLAGS != @last_compilation_flags
+      if @last_compilation_flags
+        puts("Compilation flags were changed, all files will be recompiled")
+        puts(ANSI_RED+@last_compilation_flags+ANSI_RESET)
+        puts(ANSI_GREEN+COMPILATION_FLAGS+ANSI_RESET)
+      else
+        puts("No compilation flags found in the log file, all files will be recompiled")
+      end
+      delete_all_compiled_files
+    end
+
+    @source_files = Dir.glob(File.join('**', '*.c'), base: EXERCISES_DIR).sort
+
+    if @source_files.empty?
+      puts "No source files found in #{EXERCISES_DIR}"
+      return
+    end
+
+    compile_files_in_parallel(5)
+
+    save_log
+    print_summary
+  end
+
+  private
+
+  def compile_files_in_parallel(pool_size)
+    queue = Queue.new
+    @source_files.each { |file| queue << file }
+    @printed_completed_lines_count = 0
+    @printed_in_progress_lines_count = 0
+
+    threads = pool_size.times.map do
+      Thread.new do
+        loop do
+          source_file = queue.pop(true)
+          compile_file(source_file)
+        rescue ThreadError
+          # This error means the queue is empty
+          break
+        end
+      end
+    end
+
+    threads.each(&:join)
+  end
+
+  def load_log
+    log = {}
+    flags = ''
+
+    return [log, flags] unless File.exist?(COMPILATION_LOG_FILE)
+
+    lines = File.readlines(COMPILATION_LOG_FILE).map(&:chomp)
+
+    first_line = lines.first
+    if first_line.start_with?('COMPILATION_FLAGS=')
+      flags = first_line.sub(/^COMPILATION_FLAGS=/,'')
+      lines.shift
+    end
+
+    lines.each do |line|
+      parts = line.split('|').map(&:strip)
+      next unless parts.length == 4
+
+      source_file = parts[0]
+      log[source_file] = {
+        compiled_file: parts[1],
+        timestamp: parts[2],
+        sha: parts[3]
+      }
+    end
+
+    [log, flags]
+  end
+
+  def save_log
+    File.open(COMPILATION_LOG_FILE, 'w') do |f|
+      f.puts("COMPILATION_FLAGS=#{COMPILATION_FLAGS}")
+      @log.each do |source_file, data|
+        f.puts("#{source_file}|#{data.fetch(:compiled_file)}|#{data.fetch(:timestamp)}|#{data.fetch(:sha)}")
+      end
+    end
+  end
+
+  def delete_all_compiled_files
+    Dir.glob(File.join(COMPILED_FILES_DIR, "*")).each do |path|
+      File.delete(path)
+    end
+  end
+
+  def file_sha256(path)
+    Digest::SHA256.file(path).hexdigest[0..9]
+  end
+
+  def need_compilation?(source_file)
+    return true unless @log.key?(source_file)
+
+    log_entry = @log[source_file]
+    source_file_path = File.join(EXERCISES_DIR, source_file)
+    compiled_file_path = File.join(COMPILED_FILES_DIR, log_entry.fetch(:compiled_file))
+
+    return true unless File.exist?(compiled_file_path)
+
+    stat = File.stat(source_file_path)
+    new_sha = file_sha256(source_file_path)
+
+    log_entry.fetch(:timestamp) != stat.mtime.to_s || 
+      log_entry.fetch(:sha) != new_sha
+  end
+
+  def compile_file(source_file)
+    unless need_compilation?(source_file)
+      @mutex.synchronize do
+        @completed_files << { file: source_file, status: :skipped }
+        print_progress
+      end
+      return
+    end
+   
+    @mutex.synchronize do
+      @in_progress_files << source_file
+      print_progress
+    end
+
+    source_file_path = File.join(EXERCISES_DIR, source_file)
+    compiled_file = source_file.sub(/\.c$/, '').gsub("/", "-")
+    compiled_file_path = File.join(COMPILED_FILES_DIR, compiled_file)
+
+    command = [
+      COMPILER,
+      COMPILATION_FLAGS,
+      '-o',
+      Shellwords.escape(compiled_file_path),
+      Shellwords.escape(source_file_path),
+    ].join(' ')
+    output = `#{command} 2>&1`
+
+    # Mimic compilation with random duration
+    # sleep([0.5, 0.6, 0.3, 0.7, 0.2].sample)
+
+    compile_status = $?.success? ? :success : :error
+
+    @mutex.synchronize do
+      if compile_status == :success
+        stat = File.stat(source_file_path)
+        @log[source_file] = {
+          compiled_file: compiled_file,
+          timestamp: stat.mtime.to_s,
+          sha: file_sha256(source_file_path)
+        }
+
+        if output.strip.length > 0
+          @warnings << { file: source_file, output: output }
+        end
+
+      else
+        @errors << { file: source_file, output: output }
+      end
+
+      @in_progress_files.delete(source_file)
+      @completed_files << { file: source_file, status: compile_status }
+      print_progress
+    end
+  end
+
+  def print_progress
+    # Move cursor up to beginning of the in-progress block of lines.
+    # Erase it and reprint over it.
+
+    if @printed_in_progress_lines_count > 0
+      print ANSI_MOVE_CURSOR_UP_N_LINES.call(@printed_in_progress_lines_count)
+      print ANSI_CLEAR_FROM_CURSOR_TO_END_OF_SCREEN
+    end
+
+    # Print only new lines added to the completed list
+    @completed_files[@printed_completed_lines_count..-1].each_with_index do |entry, index|
+      ansi_status = case entry.fetch(:status)
+      when :skipped then "#{ANSI_DIM}skipped#{ANSI_RESET}"
+      when :success then "#{ANSI_GREEN}✓#{ANSI_RESET}"
+      when :error then "#{ANSI_RED}✗#{ANSI_RESET}"
+      else
+        raise StandardError, "Unexpected compilation status: #{entry.fetch(:status)}"
+      end
+
+      offset = index + 1
+      ordinal_number = @printed_completed_lines_count + offset
+      puts "[#{ordinal_number}/#{@source_files.count}] #{entry.fetch(:file)} #{ansi_status}"
+      @printed_completed_lines_count += 1 
+    end
+
+    # ... and print all in-progress lines
+    @in_progress_files.each_with_index do |source_file, index|
+      ordinal_number = index + 1
+      puts "#{ANSI_DIM}[#{ordinal_number}/#{@in_progress_files.count}] #{source_file} ...#{ANSI_RESET}"
+    end
+    @printed_in_progress_lines_count = @in_progress_files.count
+
+    $stdout.flush
+  end
+
+  def print_summary
+
+    if @in_progress_files.count > 0
+      puts("Files in progress: #{@in_progress_files.inspect}")
+      raise StandardError, "Some files are still compiling, see above"
+    end
+
+    successful_count = failed_count = skipped_count = 0
+    @completed_files.each do |entry|
+      case entry.fetch(:status)
+      when :success then successful_count += 1
+      when :error then failed_count += 1
+      when :skipped then skipped_count += 1
+      else
+        raise StandardError, "Unknown compilation status: #{entry.fetch(:status)}"
+      end
+    end
+
+    puts
+    puts "=" * 60
+    puts "Compilation Summary:"
+    puts "  Successful: #{ANSI_GREEN}#{successful_count}#{ANSI_RESET}"
+    if skipped_count > 0
+      puts "  Skipped: #{ANSI_DIM}#{skipped_count}#{ANSI_RESET}"
+    end
+    if @warnings.any?
+      puts "  Warnings: #{ANSI_YELLOW}#{@warnings.length}#{ANSI_RESET}"
+    end
+    if failed_count > 0
+      puts "  Failed: #{ANSI_RED}#{failed_count}#{ANSI_RESET}"
+    end
+
+    if @errors.any?
+      puts
+      puts "Errors:"
+      @errors.each do |error|
+        puts "\n#{ANSI_RED}#{error.fetch(:file)}#{ANSI_RESET}:"
+        puts error.fetch(:output)
+      end
+    end
+
+    if @warnings.any?
+      puts
+      puts "Warnings:"
+      @warnings.each do |warning|
+        puts "\n#{ANSI_YELLOW}#{warning.fetch(:file)}#{ANSI_RESET}:"
+        puts warning.fetch(:output)
+      end
+    end
+
+    exit(failed_count > 0 ? 1 : 0)
+  end
+end
+
+force = ARGV[0] == '--force' || ARGV[0] == '-f'
+ExerciseCompiler.new.run(force)
