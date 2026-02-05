@@ -15,6 +15,7 @@ class ExerciseTestRunner
   ANSI_RED    = "\e[31m".freeze
   ANSI_YELLOW = "\e[33m".freeze
   ANSI_DIM    = "\e[2m".freeze
+  ANSI_BOLD   = "\e[1m".freeze
   ANSI_RESET  = "\e[0m".freeze
 
   def initialize(show_pending)
@@ -22,7 +23,7 @@ class ExerciseTestRunner
   end
 
   def run
-    puts "Running tests for Kernigan & Ritchie exercises"
+    puts "#{ANSI_BOLD}Running tests for Kernigan & Ritchie exercises#{ANSI_RESET}"
     puts "=" * 60
 
     unless Dir.exist?(TEST_DIR)
@@ -185,10 +186,45 @@ class ExerciseTestRunner
     }
   end
 
+  def print_diff(expected, actual)
+    require 'tempfile'
+
+    # Create temporary files for diff
+    expected_file = Tempfile.new('expected')
+    actual_file = Tempfile.new('actual')
+
+    begin
+      expected_file.write(expected)
+      expected_file.close
+
+      actual_file.write(actual)
+      actual_file.close
+
+      # Run diff and colorize output
+      diff_output = `diff -u #{expected_file.path} #{actual_file.path} 2>&1`
+
+      diff_output.each_line do |line|
+        # Skip the file headers
+        next if line.start_with?('---', '+++')
+
+        if line.start_with?('-')
+          puts "    #{ANSI_RED}#{line.chomp}#{ANSI_RESET}"
+        elsif line.start_with?('+')
+          puts "    #{ANSI_GREEN}#{line.chomp}#{ANSI_RESET}"
+        else
+          puts "    #{ANSI_DIM}#{line.chomp}#{ANSI_RESET}"
+        end
+      end
+    ensure
+      expected_file.unlink
+      actual_file.unlink
+    end
+  end
+
   def print_summary
     puts
     puts "=" * 60
-    puts "Test Summary:"
+    puts "#{ANSI_BOLD}Test Summary:#{ANSI_RESET}"
     puts "  #{ANSI_GREEN}Passed tests: #{@passed_test_count}#{ANSI_RESET}"
     if @failed_test_count > 0
       puts "  #{ANSI_RED}Failed tests: #{@failed_test_count}#{ANSI_RESET}"
@@ -204,14 +240,19 @@ class ExerciseTestRunner
       puts
       puts "Failed Tests:"
       @failures.each do |failure|
-        puts "#{ANSI_RED}- #{failure[:test_file]}#{ANSI_RESET}"
+        puts "#{ANSI_RED}- #{failure[:source_file]} - #{failure[:test_file]}#{ANSI_RESET}"
         if failure.fetch(:error)
           failure.fetch(:error).each_line { |l| puts "  #{l}" }
         else
-          puts "  Expected:"
+          puts "  #{ANSI_BOLD}Expected:#{ANSI_RESET}"
           failure.fetch(:expected).each_line { |l| puts "    #{l}" }
-          puts "  Actual:"
+          puts
+          puts "  #{ANSI_BOLD}Actual:#{ANSI_RESET}"
           failure.fetch(:actual).each_line { |l| puts "    #{l}" }
+          puts
+          puts "  #{ANSI_BOLD}Diff:#{ANSI_RESET}"
+          print_diff(failure.fetch(:expected), failure.fetch(:actual))
+          puts
         end
       end
     end

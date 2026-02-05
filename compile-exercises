@@ -35,6 +35,7 @@ class ExerciseCompiler
   ANSI_RED = "\e[31m".freeze
   ANSI_YELLOW = "\e[33m".freeze
   ANSI_DIM = "\e[2m".freeze
+  ANSI_BOLD  = "\e[1m".freeze
   ANSI_RESET = "\e[0m".freeze
   ANSI_CLEAR_FROM_CURSOR_TO_END_OF_SCREEN = "\e[J".freeze
   ANSI_MOVE_CURSOR_UP_N_LINES = ->(n) { "\e[#{n}A" }
@@ -43,15 +44,16 @@ class ExerciseCompiler
     @mutex = Mutex.new
   end
 
-  def run(force)
+  def run(force:, show_skipped:)
+    @show_skipped = show_skipped
+
     @in_progress_files = []
     @completed_files = []
     @errors = []
     @warnings = []
     @log, @last_compilation_flags = load_log
 
-    puts "Compiling source files from #{EXERCISES_DIR}"
-    puts "=" * 60
+    puts "#{ANSI_BOLD}Compiling source files from#{ANSI_RESET} #{EXERCISES_DIR}"
 
     unless Dir.exist?(EXERCISES_DIR)
       puts "Error: #{EXERCISES_DIR} does not exist"
@@ -239,8 +241,16 @@ class ExerciseCompiler
       print ANSI_CLEAR_FROM_CURSOR_TO_END_OF_SCREEN
     end
 
+    completed_files_to_print = if @show_skipped
+      @completed_files
+    else
+      @completed_files.reject do |entry|
+        entry.fetch(:status) == :skipped
+      end
+    end
+
     # Print only new lines added to the completed list
-    @completed_files[@printed_completed_lines_count..-1].each_with_index do |entry, index|
+    completed_files_to_print[@printed_completed_lines_count..-1].each_with_index do |entry, index|
       ansi_status = case entry.fetch(:status)
       when :skipped then "#{ANSI_DIM}skipped#{ANSI_RESET}"
       when :success then "#{ANSI_GREEN}✓#{ANSI_RESET}"
@@ -285,7 +295,7 @@ class ExerciseCompiler
 
     puts
     puts "=" * 60
-    puts "Compilation Summary:"
+    puts "#{ANSI_BOLD}Compilation Summary:#{ANSI_RESET}"
     puts "  Successful: #{ANSI_GREEN}#{successful_count}#{ANSI_RESET}"
     if skipped_count > 0
       puts "  Skipped: #{ANSI_DIM}#{skipped_count}#{ANSI_RESET}"
@@ -319,5 +329,18 @@ class ExerciseCompiler
   end
 end
 
-force = ARGV[0] == '--force' || ARGV[0] == '-f'
-ExerciseCompiler.new.run(force)
+force = false
+show_skipped = false
+ARGV.each do |arg|
+  if arg == '--force' || arg == '-f'
+    force = true
+  end
+  if arg == '--skipped' || arg == '-s'
+    show_skipped = true
+  end
+end
+
+ExerciseCompiler.new.run(
+  force: force,
+  show_skipped: show_skipped
+)
