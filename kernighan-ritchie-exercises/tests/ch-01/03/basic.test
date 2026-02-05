@@ -1,0 +1,32 @@
+[EXPECTED]
+Fahrenheit to Celsius conversion table:
+F      | C     
+---------------
+   0.0 |  -17.8
+  20.0 |   -6.7
+  40.0 |    4.4
+  60.0 |   15.6
+  80.0 |   26.7
+ 100.0 |   37.8
+ 120.0 |   48.9
+ 140.0 |   60.0
+ 160.0 |   71.1
+ 180.0 |   82.2
+ 200.0 |   93.3
+ 220.0 |  104.4
+ 240.0 |  115.6
+ 260.0 |  126.7
+ 280.0 |  137.8
+ 300.0 |  148.9
+---------------
+
+Reference temperatures:
+F      | C      | Reference
+-------------------------
+  32.0 |    0.0 | Water freezing point
+ 212.0 |  100.0 | Water boiling point
+  98.6 |   37.0 | Normal body temperature
+-128.6 |  -89.2 | Lowest temperature on Earth (Antarctica)
+ 134.0 |   56.7 | Highest temperature on Earth (Death Valley)
+ -40.0 |  -40.0 | Where F and C are equal
+-------------------------
