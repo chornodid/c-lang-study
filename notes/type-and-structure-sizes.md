@@ -4,13 +4,20 @@
 
 The C standard only guarantees minimum sizes:
 
-| Type        | Minimum | Typical 32-bit | Typical 64-bit |
-|-------------|---------|----------------|----------------|
-| `char`      | 8 bits  | 8 bits         | 8 bits         |
-| `short`     | 16 bits | 16 bits        | 16 bits        |
-| `int`       | 16 bits | 32 bits        | 32 bits        |
-| `long`      | 32 bits | 32 bits        | 32 or 64 bits  |
-| `long long` | 64 bits | 64 bits        | 64 bits        |
+| Type          | Minimum | Typical 32-bit | Typical 64-bit |
+|---------------|---------|----------------|----------------|
+| `char`        | 8 bits  | 8 bits         | 8 bits         |
+| `short`       | 16 bits | 16 bits        | 16 bits        |
+| `int`         | 16 bits | 32 bits        | 32 bits        |
+| `long`        | 32 bits | 32 bits        | 32 or 64 bits  |
+| `long long`   | 64 bits | 64 bits        | 64 bits        |
+| `float`       | —       | 32 bits        | 32 bits        |
+| `double`      | —       | 64 bits        | 64 bits        |
+| `long double` | —       | 80 or 96 bits  | 80 or 128 bits |
+
+Floating-point types follow the [IEEE 754](ieee-754.md) standard. The C
+standard doesn't specify minimum bit sizes for them the way it does for
+integers — instead it defers to IEEE 754 representation.
 
 ## Factors Affecting Type/Structure Sizes
 
@@ -21,21 +28,45 @@ The C standard only guarantees minimum sizes:
 
 ### CPU Architecture
 
-- Word size (16/32/64-bit) influences natural type sizes
-- Alignment requirements vary
+The CPU's **word size** (16/32/64-bit) refers to the width of its
+general-purpose registers and native data paths. A 64-bit CPU has
+64-bit registers and can address 2^64 bytes of memory in theory.
 
-### OS / ABI (Application Binary Interface)
+However, a 64-bit CPU can still run 32-bit code — the CPU typically
+has a compatibility mode for this. So CPU bit-ness sets the upper
+bound, not the actual type sizes your program gets.
 
-Defines the data model:
+### Operating System
 
-| Model | int | long | pointer | Used by                |
-|-------|-----|------|---------|------------------------|
-| ILP32 | 32  | 32   | 32      | 32-bit Linux/Windows   |
-| LLP64 | 32  | 32   | 64      | 64-bit Windows         |
-| LP64  | 32  | 64   | 64      | 64-bit Linux/macOS     |
+The OS chooses whether to run in 32-bit or 64-bit mode:
 
-This is why `long` is 32 bits on Windows 64-bit but 64 bits on
-Linux 64-bit.
+- A 64-bit CPU can run a 32-bit or 64-bit OS
+- A 64-bit OS can run 32-bit processes (in compatibility mode)
+- A 32-bit OS cannot use 64-bit features even on a 64-bit CPU
+
+The OS defines the **ABI** (Application Binary Interface) — a contract
+between compiled code and the system. The ABI specifies:
+
+- Sizes of fundamental types (`int`, `long`, pointers)
+- Struct alignment and padding rules
+- Function calling conventions (how arguments are passed)
+- System call interface
+
+### Data Model
+
+The **data model** is the part of the ABI that determines type sizes.
+The name encodes which types are a given width — the letters stand for
+**I**nt, **L**ong, **L**ong long, and **P**ointer:
+
+| Model | int | long | long long | pointer | Used by              |
+|-------|-----|------|-----------|---------|----------------------|
+| ILP32 | 32  | 32   | 64        | 32      | 32-bit Linux/Windows |
+| LLP64 | 32  | 32   | 64        | 64      | 64-bit Windows       |
+| LP64  | 32  | 64   | 64        | 64      | 64-bit Linux/macOS   |
+
+This is why `long` is 32 bits on Windows 64-bit (LLP64 — only
+**L**ong **L**ong and **P**ointers are 64) but 64 bits on Linux 64-bit
+(LP64 — **L**ong and **P**ointers are 64).
 
 ### Compiler
 

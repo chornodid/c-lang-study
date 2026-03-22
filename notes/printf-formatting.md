@@ -13,6 +13,8 @@ Format specifiers start with `%` and specify how to format arguments.
 
 ## Common Format Specifiers
 
+Note: `float` arguments are automatically promoted to `double` when passed to `printf`.
+
 | Specifier | Type | Example Output |
 |-----------|------|----------------|
 | `%d` | int (decimal) | `42` |
@@ -21,10 +23,10 @@ Format specifiers start with `%` and specify how to format arguments.
 | `%x` | unsigned int (hex lowercase) | `2a` |
 | `%X` | unsigned int (hex uppercase) | `2A` |
 | `%o` | unsigned int (octal) | `52` |
-| `%f` | double (fixed-point) | `3.140000` |
-| `%e` | double (scientific, lowercase) | `3.140000e+00` |
-| `%E` | double (scientific, uppercase) | `3.140000E+00` |
-| `%g` | double (shortest format) | `3.14` |
+| `%f` | double (fixed-point) | `3.140000` (default: 6 decimals) |
+| `%e` | double (scientific, lowercase) | `3.140000e+00` (default: 6 decimals) |
+| `%E` | double (scientific, uppercase) | `3.140000E+00` (default: 6 decimals) |
+| `%g` | double (shortest format) | `3.14` (default: 6 significant digits) |
 | `%c` | char | `A` |
 | `%s` | string (char \*) | `hello` |
 | `%p` | pointer address | `0x7ffd5e8a9b40` |
@@ -62,7 +64,7 @@ printf("%%\n");                 /* % */
 
 ### Width
 
-Minimum field width (pads with spaces by default):
+Minimum field width (pads with spaces if needed, default: no padding):
 
 ```c
 printf("%5d\n", 42);            /*    42 (3 spaces + 42) */
@@ -72,7 +74,10 @@ printf("%-5d\n", 42);           /* 42    (42 + 3 spaces, left-aligned) */
 
 ### Precision
 
-For floats: number of digits after decimal point:
+The `.N` syntax is called "precision" but means different things for different types:
+
+For floats: number of digits after decimal point
+(default: 6 for %f/%e, 6 significant digits for %g):
 
 ```c
 printf("%.2f\n", 3.14159);      /* 3.14 */
@@ -80,14 +85,15 @@ printf("%.4f\n", 3.14159);      /* 3.1416 (rounded) */
 printf("%6.2f\n", 3.14159);     /*   3.14 (width 6, precision 2) */
 ```
 
-For strings: maximum characters to print:
+For strings: maximum characters to print (default: entire string):
+Note: Called "precision" in the C spec, but really a length limit/truncation.
 
 ```c
 printf("%.3s\n", "hello");      /* hel */
 printf("%8.3s\n", "hello");     /*      hel (width 8, max 3 chars) */
 ```
 
-For integers: minimum digits (pads with zeros):
+For integers: minimum digits (pads with zeros, default: no padding):
 
 ```c
 printf("%.5d\n", 42);           /* 00042 */
@@ -106,10 +112,10 @@ printf("%.5d\n", 42);           /* 00042 */
 ### Examples
 
 ```c
-printf("%-5d\n", 42);           /* "42   " (left-aligned) */
+printf("%-5d\n", 42);           /* 42    (left-aligned) */
 printf("%+d\n", 42);            /* +42 */
 printf("%+d\n", -42);           /* -42 */
-printf("% d\n", 42);            /* " 42" (space before positive) */
+printf("% d\n", 42);            /*  42 (space before positive) */
 printf("% d\n", -42);           /* -42 (no space for negative) */
 printf("%05d\n", 42);           /* 00042 */
 printf("%#x\n", 42);            /* 0x2a */
@@ -119,7 +125,7 @@ printf("%#.2f\n", 3.0);         /* 3.00 (force decimal point) */
 
 ## Length Modifiers
 
-Used to specify the size of integer arguments:
+Used to specify the size of arguments:
 
 | Modifier | Type | Example |
 |----------|------|---------|
@@ -127,6 +133,7 @@ Used to specify the size of integer arguments:
 | `h` | short | `%hd` |
 | `l` | long | `%ld` |
 | `ll` | long long | `%lld` |
+| `L` | long double | `%Lf` |
 | `z` | size_t | `%zu` |
 | `t` | ptrdiff_t | `%td` |
 
@@ -144,6 +151,9 @@ printf("%ld\n", l);             /* 1234567890 */
 
 long long ll = 9876543210LL;
 printf("%lld\n", ll);           /* 9876543210 */
+
+long double ld = 3.141592653589793238L;
+printf("%Lf\n", ld);            /* 3.141593 (higher precision possible) */
 
 size_t sz = sizeof(int);
 printf("%zu\n", sz);            /* 4 (or 8 on 64-bit) */
@@ -293,8 +303,8 @@ n = snprintf(small, sizeof(small), "x = 42");
 %[flags][width][.precision][length]specifier
  │      │      │           │        │
  │      │      │           │        └─ d, f, s, etc.
- │      │      │           └─────────── hh, h, l, ll, z, t
- │      │      └─────────────────────── .N (precision)
+ │      │      │           └─────────── hh, h, l, ll, L, z, t
+ │      │      └─────────────────────── .N (meaning varies by type)
  │      └────────────────────────────── N (min width)
  └───────────────────────────────────── -, +, 0, #, space
 ```

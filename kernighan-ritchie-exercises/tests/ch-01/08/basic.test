@@ -1,0 +1,8 @@
+[STDIN]
+hello  world	test
+	another	line
+
+[EXPECTED]
+Number of lines: 3
+Number of tabs: 3
+Number of blanks: 2

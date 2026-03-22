@@ -1,0 +1,6 @@
+[STDIN]
+backslash\
+
+[EXPECTED]
+back\bslash\\
+

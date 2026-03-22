@@ -5,7 +5,7 @@
 #include <stdio.h>
 
 int main(void) {
-  fprintf(stderr, "PENDING\n");
+  printf("%d\n", EOF);
   return 0;
 }
 

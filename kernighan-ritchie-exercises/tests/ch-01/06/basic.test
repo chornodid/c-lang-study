@@ -1,0 +1,3 @@
+[EXPECTED]
+first char is not EOF:  1
+second char is not EOF: 0
