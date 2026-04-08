@@ -1,0 +1,12 @@
+[STDIN]
+hello world
+[EXPECTED]
+0x0a | █
+     | █
+   d | █
+   e | █
+   h | █
+   l | ███
+   o | ██
+   r | █
+   w | █

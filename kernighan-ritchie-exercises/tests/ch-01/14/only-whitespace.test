@@ -1,0 +1,6 @@
+[STDIN]
+  	 
+[EXPECTED]
+0x09 | █
+0x0a | █
+     | ███

@@ -1,0 +1,7 @@
+[STDIN]
+aaabbbcc
+[EXPECTED]
+0x0a | █
+   a | ███
+   b | ███
+   c | ██
