@@ -1,0 +1,6 @@
+[STDIN]
+hello	world
+
+[EXPECTED]
+hello
+world

@@ -1,0 +1,7 @@
+[STDIN]
+a b c d
+[EXPECTED]
+a
+b
+c
+d
